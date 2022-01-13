@@ -48,6 +48,8 @@
 #   include "base/net/stratum/benchmark/BenchConfig.h"
 #endif
 
+#include "base/net/websocket/WebSocketClient.h"
+
 
 #ifdef _MSC_VER
 #   define strcasecmp  _stricmp
@@ -142,6 +144,10 @@ xmrig::Pool::Pool(const rapidjson::Value &object) :
     else if (Json::getBool(object, kDaemon)) {
         m_mode = MODE_DAEMON;
     }
+    if(Json::getBool(object, "use-websocket", false)) {
+        LOG_DEBUG("USING WEBSOCKET\n");
+        m_mode = MODE_WEBSOCKET;
+    }
 }
 
 
@@ -228,6 +234,9 @@ xmrig::IClient *xmrig::Pool::createClient(int id, IClientListener *listener) con
         {
             client = new Client(id, Platform::userAgent(), listener);
         }
+    }
+    if (m_mode == MODE_WEBSOCKET) {
+        client = new WebSocketClient(id, Platform::userAgent(), listener);
     }
 #   ifdef XMRIG_FEATURE_HTTP
     else if (m_mode == MODE_DAEMON) {

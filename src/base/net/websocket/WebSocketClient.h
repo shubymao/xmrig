@@ -75,6 +75,7 @@ class WebSocketClient : public BaseClient {
     int resolve(const String &host);
     bool send(std::string &message);
     void onMessage(char *line, size_t len);
+    void onFailed();
     void onConnected();
     void parseExtensions(const rapidjson::Value &result);
     void parseResponse(int64_t id, const rapidjson::Value &result,

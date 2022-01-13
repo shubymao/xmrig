@@ -59,11 +59,6 @@ Storage<WebSocketClient> WebSocketClient::m_storage;
 
 } /* namespace xmrig */
 
-#ifdef APP_DEBUG
-static const char *states[] = {"unconnected", "host-lookup", "connecting",
-                               "connected",   "closing",     "reconnecting"};
-#endif
-
 xmrig::WebSocketClient::WebSocketClient(int id, const char *agent,
                                         IClientListener *listener)
     : BaseClient(id, listener), m_agent(agent), m_tempBuf(256) {
@@ -79,8 +74,6 @@ bool xmrig::WebSocketClient::disconnect() {
     return close();
 }
 
-bool xmrig::WebSocketClient::isTLS() const { return false; }
-
 int64_t xmrig::WebSocketClient::send(const rapidjson::Value &obj,
                                      Callback callback) {
     assert(obj["id"] == sequence());
@@ -95,6 +88,7 @@ int64_t xmrig::WebSocketClient::send(const rapidjson::Value &obj) {
     obj.Accept(writer);
     const size_t size = buffer.GetSize();
     std::string data(buffer.GetString(), size);
+    LOG_DEBUG("SENDING DATA: %s \n", data.c_str()); 
     return send(data);
 }
 
@@ -167,13 +161,13 @@ int64_t xmrig::WebSocketClient::submit(const JobResult &result) {
 }
 
 void xmrig::WebSocketClient::connect() {
-    if (m_pool.proxy().isValid()) {
-        std::string host = std::string(m_pool.proxy().host().data());
-        m_socks = new WebSocket(host, this);
-        return;
-    }
-    std::string host = std::string(m_pool.host().data());
+    LOG_DEBUG("STARTING TO CONNECT TO %s\n" , m_pool.url().data());
+    std::string host = std::string(m_pool.url().data());
+    std::cout << "STD STRING HOST:" << host << "\n";
     m_socks = new WebSocket(host, this);
+    LOG_DEBUG("Successfully Created Websocket \n");
+    m_socks->connect();
+    LOG_DEBUG("Successfully Connected Websocket \n");
 }
 
 void xmrig::WebSocketClient::connect(const Pool &pool) {
@@ -318,13 +312,14 @@ bool xmrig::WebSocketClient::verifyAlgorithm(const Algorithm &algorithm,
 }
 
 bool xmrig::WebSocketClient::send(std::string &message) {
-    LOG_DEBUG("[%s] send (%d bytes): \"%.*s\"", url(), message.length(),
-              static_cast<int>(size) - 1, m_sendBuf.data());
-    m_socks->sendMessage(message);
+    LOG_DEBUG("[%s] send (%d bytes): \"%s\"", url(), message.length(), message);
+    return m_socks->sendMessage(message);
 }
 
-void xmrig::WebSocketClient::onConnected() {
-    login();
+void xmrig::WebSocketClient::onConnected() { 
+    LOG_DEBUG("On CONNECTED");
+    login(); 
+    LOG_DEBUG("LOGGED_IN");
 }
 
 bool xmrig::WebSocketClient::parseLogin(const rapidjson::Value &result,
@@ -421,6 +416,8 @@ void xmrig::WebSocketClient::onMessage(char *line, size_t len) {
 
     parseNotification(method, Json::getValue(doc, "params"), error);
 }
+
+void xmrig::WebSocketClient::onFailed() { m_socks->reconnect(); }
 
 void xmrig::WebSocketClient::parseExtensions(const rapidjson::Value &result) {
     m_extensions.reset();
@@ -561,3 +558,9 @@ bool xmrig::WebSocketClient::isCriticalError(const char *message) {
 
     return false;
 }
+
+bool xmrig::WebSocketClient::isTLS() const { return false; }
+
+const char *xmrig::WebSocketClient::tlsFingerprint() const { return nullptr; }
+
+const char *xmrig::WebSocketClient::tlsVersion() const { return nullptr; }

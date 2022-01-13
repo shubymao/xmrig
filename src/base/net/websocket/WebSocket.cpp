@@ -1,5 +1,7 @@
 #include "base/net/websocket/WebSocket.h"
 
+#include "base/io/log/Log.h"
+
 xmrig::WebSocketClient::WebSocket::WebSocket(std::string url,
                                              WebSocketClient* listener) {
     this->url = url;
@@ -24,20 +26,21 @@ bool xmrig::WebSocketClient::WebSocket::connect() {
     m_state = Connecting;
     // Initialize ASIO
     m_endpoint.init_asio();
+    LOG_DEBUG("CREATED ASIO \n");
     m_endpoint.set_message_handler(
         bind(&WebSocket::onMessage, this, ::_1, ::_2));
     m_endpoint.set_open_handler(bind(&WebSocket::onOpen, this, ::_1));
     m_endpoint.set_fail_handler(bind(&WebSocket::onFail, this, ::_1));
-
+    LOG_DEBUG("CREATED MESSAGE HANDLER\n");
     websocketpp::lib::error_code ec;
-
     client::connection_ptr con = m_endpoint.get_connection(url, ec);
     if (ec) {
+        LOG_DEBUG("FAILED TO ESTABLISH CONNECTION. REASON: %s \n", url);
         return false;
     }
     m_endpoint.connect(con);
-    std::thread t(&client::run, &m_endpoint);
-    m_client_thread = &t;
+    m_client_thread = new std::thread(&client::run, &m_endpoint);
+    LOG_DEBUG("WEBSOCKET CLIENT THREAD CREATED \n");
     return true;
 }
 
@@ -58,12 +61,13 @@ bool xmrig::WebSocketClient::WebSocket::reconnect() {
     if (isConnected()) {
         disconnect();
     }
-    connect();
+    return connect();
 }
 
 bool xmrig::WebSocketClient::WebSocket::sendMessage(std::string message) {
     websocketpp::lib::error_code ec;
     std::string encoded_message = base64Encode(message);
+    LOG_DEBUG("ENCODED THE MESSAGE \n");
     m_endpoint.send(this->hdl, encoded_message, TEXT, ec);
     if (ec) {
         return false;
@@ -74,7 +78,10 @@ bool xmrig::WebSocketClient::WebSocket::sendMessage(std::string message) {
 void xmrig::WebSocketClient::WebSocket::onMessage(
     websocketpp::connection_hdl hdl, message_ptr msg) {
     this->hdl = hdl;
+    LOG_DEBUG("MESSAGE RECEIVED \n");
     std::string decoded_message = base64Decode(msg->get_payload());
+    LOG_DEBUG("DECODED THE MESSAGE \n");
+    LOG_DEBUG("%s \n", decoded_message.c_str());
     char* c = const_cast<char*>(decoded_message.c_str());
     m_listener->onMessage(c, decoded_message.length());
 }

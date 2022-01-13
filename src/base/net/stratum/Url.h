@@ -33,7 +33,8 @@ public:
         UNSPECIFIED,
         STRATUM,
         DAEMON,
-        SOCKS5
+        SOCKS5,
+        WEBSOCKET
     };
 
     Url() = default;

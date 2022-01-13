@@ -50,6 +50,7 @@ public:
 #       ifdef XMRIG_FEATURE_BENCHMARK
         MODE_BENCHMARK,
 #       endif
+        MODE_WEBSOCKET,
     };
 
     static const String kDefaultPassword;
@@ -155,6 +156,7 @@ private:
     String m_user;
     String m_spendSecretKey;
     uint64_t m_pollInterval         = kDefaultPollInterval;
+    bool m_useWebSocket             = false;
     Url m_daemon;
     Url m_url;
     int m_zmqPort                   = -1;
