@@ -307,6 +307,7 @@ int64_t xmrig::WebSocketClient::send(std::string &message) {
     LOG_DEBUG("[%s] send (%d bytes): \"%s\"", url(), message.length(), message);
     if (!m_socks->sendMessage(message)) {
         LOG_ERR("[%s] send failed", url());
+        m_socks->reconnect();
         return -1;
     }
     int64_t old_seq = m_sequence;

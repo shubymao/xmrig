@@ -6,7 +6,7 @@ xmrig::WebSocketClient::WebSocket::WebSocket(std::string url,
                                              WebSocketClient* listener) {
     this->url = url;
     this->m_listener = listener;
-    m_endpoint.set_access_channels(websocketpp::log::alevel::all);
+    m_endpoint.set_access_channels(websocketpp::log::alevel::none);
     m_endpoint.set_error_channels(websocketpp::log::elevel::all);
     m_endpoint.init_asio();
     LOG_DEBUG("CREATED ASIO \n");
