@@ -8,9 +8,38 @@ xmrig::WebSocketClient::WebSocket::WebSocket(std::string url,
     this->m_listener = listener;
     m_endpoint.set_access_channels(websocketpp::log::alevel::all);
     m_endpoint.set_error_channels(websocketpp::log::elevel::all);
+    m_endpoint.init_asio();
+    LOG_DEBUG("CREATED ASIO \n");
+    m_endpoint.set_message_handler(
+        bind(&WebSocket::onMessage, this, ::_1, ::_2));
+    m_endpoint.set_open_handler(bind(&WebSocket::onOpen, this, ::_1));
+    m_endpoint.set_close_handler(bind(&WebSocket::onClose, this));
+    m_endpoint.set_fail_handler(bind(&WebSocket::onFail, this));
+    LOG_DEBUG("CREATED MESSAGE HANDLER\n");
 }
 
-xmrig::WebSocketClient::WebSocket::~WebSocket() { disconnect(); }
+xmrig::WebSocketClient::WebSocket::~WebSocket() { 
+    should_reconnect = false;
+    disconnect(); 
+}
+
+void xmrig::WebSocketClient::WebSocket::run() {
+    // Initialize ASIO
+    while(should_reconnect){
+        websocketpp::lib::error_code ec;
+        client::connection_ptr con = m_endpoint.get_connection(url, ec);
+        if (ec) {
+            LOG_DEBUG("FAILED TO ESTABLISH CONNECTION. REASON: %s \n", url);
+            return;
+        }
+        LOG_DEBUG("CONNECTING TO End Point\n");
+        m_endpoint.connect(con);
+        LOG_DEBUG("RUNNING\n");
+        m_endpoint.run();
+        LOG_DEBUG("STOPPING\n");
+        m_endpoint.reset( );
+    }
+}
 
 bool xmrig::WebSocketClient::WebSocket::isConnected() {
     return m_state == Connected;
@@ -24,22 +53,8 @@ bool xmrig::WebSocketClient::WebSocket::connect() {
         return false;
     }
     m_state = Connecting;
-    // Initialize ASIO
-    m_endpoint.init_asio();
-    LOG_DEBUG("CREATED ASIO \n");
-    m_endpoint.set_message_handler(
-        bind(&WebSocket::onMessage, this, ::_1, ::_2));
-    m_endpoint.set_open_handler(bind(&WebSocket::onOpen, this, ::_1));
-    m_endpoint.set_fail_handler(bind(&WebSocket::onFail, this, ::_1));
-    LOG_DEBUG("CREATED MESSAGE HANDLER\n");
-    websocketpp::lib::error_code ec;
-    client::connection_ptr con = m_endpoint.get_connection(url, ec);
-    if (ec) {
-        LOG_DEBUG("FAILED TO ESTABLISH CONNECTION. REASON: %s \n", url);
-        return false;
-    }
-    m_endpoint.connect(con);
-    m_client_thread = new std::thread(&client::run, &m_endpoint);
+    LOG_DEBUG("WEBSOCKET CLIENT THREAD CREATED \n");
+    m_client_thread = std::thread(&WebSocket::run, this);
     LOG_DEBUG("WEBSOCKET CLIENT THREAD CREATED \n");
     return true;
 }
@@ -48,26 +63,26 @@ bool xmrig::WebSocketClient::WebSocket::disconnect() {
     if (m_state == Idle || m_state == Disconnecting) {
         return true;
     }
+    LOG_DEBUG("DISCONNECTING \n");
     m_state = Disconnecting;
-    m_endpoint.close(hdl, going_away, "Goodbye");
+    m_endpoint.close(hdl, going_away, "");
     m_endpoint.stop();
-    m_client_thread->join();
-    m_client_thread = nullptr;
-    m_state = Idle;
     return true;
 }
 
 bool xmrig::WebSocketClient::WebSocket::reconnect() {
-    if (isConnected()) {
-        disconnect();
-    }
-    return connect();
+    disconnect();
+    return true;
 }
 
 bool xmrig::WebSocketClient::WebSocket::sendMessage(std::string message) {
+    if (m_state != Connected) {
+        LOG_DEBUG("NOT CONNECTED \n");
+        return false;
+    }
     websocketpp::lib::error_code ec;
     std::string encoded_message = base64Encode(message);
-    LOG_DEBUG("ENCODED THE MESSAGE \n");
+    LOG_DEBUG("SENDING THE MESSAGE \n");
     m_endpoint.send(this->hdl, encoded_message, TEXT, ec);
     if (ec) {
         return false;
@@ -80,8 +95,6 @@ void xmrig::WebSocketClient::WebSocket::onMessage(
     this->hdl = hdl;
     LOG_DEBUG("MESSAGE RECEIVED \n");
     std::string decoded_message = base64Decode(msg->get_payload());
-    LOG_DEBUG("DECODED THE MESSAGE \n");
-    LOG_DEBUG("%s \n", decoded_message.c_str());
     char* c = const_cast<char*>(decoded_message.c_str());
     m_listener->onMessage(c, decoded_message.length());
 }
@@ -92,15 +105,16 @@ void xmrig::WebSocketClient::WebSocket::onOpen(
     m_state = Connected;
     m_listener->onConnected();
 }
-void xmrig::WebSocketClient::WebSocket::onClose(
-    websocketpp::connection_hdl hdl) {
-    this->hdl = hdl;
+
+void xmrig::WebSocketClient::WebSocket::onClose() {
+    LOG_DEBUG("On Close \n");
     m_state = Idle;
+    disconnect();
 }
-void xmrig::WebSocketClient::WebSocket::onFail(
-    websocketpp::connection_hdl hdl) {
-    this->hdl = hdl;
+
+void xmrig::WebSocketClient::WebSocket::onFail() {
     m_state = Idle;
+    disconnect();
 }
 
 std::string xmrig::WebSocketClient::WebSocket::base64Decode(

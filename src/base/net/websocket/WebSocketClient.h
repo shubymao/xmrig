@@ -63,7 +63,7 @@ class WebSocketClient : public BaseClient {
                                    const rapidjson::Value &error);
 
     bool close();
-    virtual void onClose();
+    void setState(SocketState state);
 
    private:
     class WebSocket;
@@ -73,7 +73,7 @@ class WebSocketClient : public BaseClient {
     bool send(BIO *bio);
     bool verifyAlgorithm(const Algorithm &algorithm, const char *algo) const;
     int resolve(const String &host);
-    bool send(std::string &message);
+    int64_t send(std::string &message);
     void onMessage(char *line, size_t len);
     void onFailed();
     void onConnected();

@@ -67,12 +67,7 @@ xmrig::WebSocketClient::WebSocketClient(int id, const char *agent,
 
 xmrig::WebSocketClient::~WebSocketClient() { delete m_socks; }
 
-bool xmrig::WebSocketClient::disconnect() {
-    m_keepAlive = 0;
-    m_expire = 0;
-    m_failures = -1;
-    return close();
-}
+bool xmrig::WebSocketClient::disconnect() { return m_socks->disconnect(); }
 
 int64_t xmrig::WebSocketClient::send(const rapidjson::Value &obj,
                                      Callback callback) {
@@ -88,28 +83,19 @@ int64_t xmrig::WebSocketClient::send(const rapidjson::Value &obj) {
     obj.Accept(writer);
     const size_t size = buffer.GetSize();
     std::string data(buffer.GetString(), size);
-    LOG_DEBUG("SENDING DATA: %s \n", data.c_str()); 
+    LOG_DEBUG("SENDING DATA: %s \n", data.c_str());
     return send(data);
 }
 
 int64_t xmrig::WebSocketClient::submit(const JobResult &result) {
-#ifndef XMRIG_PROXY_PROJECT
-    if (result.clientId != m_rpcId || m_rpcId.isNull() ||
-        m_state != ConnectedState) {
-        return -1;
-    }
-#endif
+    LOG_DEBUG("SUBMITTING RESULT \n");
 
     if (result.diff == 0) {
-        close();
+        m_socks->reconnect();
         return -1;
     }
     using namespace rapidjson;
 
-#ifdef XMRIG_PROXY_PROJECT
-    const char *nonce = result.nonce;
-    const char *data = result.result;
-#else
     char *nonce = m_tempBuf.data();
     char *data = m_tempBuf.data() + 16;
     char *signature = m_tempBuf.data() + 88;
@@ -122,7 +108,6 @@ int64_t xmrig::WebSocketClient::submit(const JobResult &result) {
     if (result.minerSignature()) {
         Cvt::toHex(signature, 129, result.minerSignature(), 64);
     }
-#endif
 
     Document doc(kObjectType);
     auto &allocator = doc.GetAllocator();
@@ -133,15 +118,9 @@ int64_t xmrig::WebSocketClient::submit(const JobResult &result) {
     params.AddMember("nonce", StringRef(nonce), allocator);
     params.AddMember("result", StringRef(data), allocator);
 
-#ifndef XMRIG_PROXY_PROJECT
     if (result.minerSignature()) {
         params.AddMember("sig", StringRef(signature), allocator);
     }
-#else
-    if (result.sig) {
-        params.AddMember("sig", StringRef(result.sig), allocator);
-    }
-#endif
 
     if (has<EXT_ALGO>() && result.algorithm.isValid()) {
         params.AddMember("algo", StringRef(result.algorithm.name()), allocator);
@@ -149,19 +128,16 @@ int64_t xmrig::WebSocketClient::submit(const JobResult &result) {
 
     JsonRequest::create(doc, m_sequence, "submit", params);
 
-#ifdef XMRIG_PROXY_PROJECT
-    m_results[m_sequence] = SubmitResult(m_sequence, result.diff,
-                                         result.actualDiff(), result.id, 0);
-#else
     m_results[m_sequence] = SubmitResult(
         m_sequence, result.diff, result.actualDiff(), 0, result.backend);
-#endif
 
-    return send(doc);
+    LOG_DEBUG("SENDING RESULT DOC \n");
+
+    return send(doc)? m_sequence : -1;
 }
 
 void xmrig::WebSocketClient::connect() {
-    LOG_DEBUG("STARTING TO CONNECT TO %s\n" , m_pool.url().data());
+    LOG_DEBUG("STARTING TO CONNECT TO %s\n", m_pool.url().data());
     std::string host = std::string(m_pool.url().data());
     std::cout << "STD STRING HOST:" << host << "\n";
     m_socks = new WebSocket(host, this);
@@ -176,22 +152,38 @@ void xmrig::WebSocketClient::connect(const Pool &pool) {
 }
 
 void xmrig::WebSocketClient::deleteLater() {
-    if (!m_listener) {
-        return;
-    }
-
-    m_listener = nullptr;
-
-    if (!disconnect()) {
-        m_storage.remove(m_key);
-    }
+    disconnect();
+    delete m_socks;
+    m_socks = nullptr;
 }
 
 void xmrig::WebSocketClient::tick(uint64_t now) {}
 
-bool xmrig::WebSocketClient::close() {
-    m_socks->disconnect();
-    return true;
+bool xmrig::WebSocketClient::close() { return false; }
+
+void xmrig::WebSocketClient::setState(SocketState state) {
+    if (m_state == state) {
+        return;
+    }
+
+    switch (state) {
+        case HostLookupState:
+            m_expire = 0;
+            break;
+
+        case ConnectingState:
+            m_expire = Chrono::steadyMSecs() + kConnectTimeout;
+            break;
+
+        case ReconnectingState:
+            m_expire = Chrono::steadyMSecs() + m_retryPause;
+            break;
+
+        default:
+            break;
+    }
+
+    m_state = state;
 }
 
 bool xmrig::WebSocketClient::parseJob(const rapidjson::Value &params,
@@ -275,7 +267,7 @@ bool xmrig::WebSocketClient::parseJob(const rapidjson::Value &params,
         LOG_WARN("%s " YELLOW("duplicate job received, reconnect"), tag());
     }
 
-    close();
+    m_socks->reconnect();
     return false;
 }
 
@@ -311,14 +303,20 @@ bool xmrig::WebSocketClient::verifyAlgorithm(const Algorithm &algorithm,
     return ok;
 }
 
-bool xmrig::WebSocketClient::send(std::string &message) {
+int64_t xmrig::WebSocketClient::send(std::string &message) {
     LOG_DEBUG("[%s] send (%d bytes): \"%s\"", url(), message.length(), message);
-    return m_socks->sendMessage(message);
+    if (!m_socks->sendMessage(message)) {
+        LOG_ERR("[%s] send failed", url());
+        return -1;
+    }
+    int64_t old_seq = m_sequence;
+    m_sequence++;
+    return old_seq;
 }
 
-void xmrig::WebSocketClient::onConnected() { 
+void xmrig::WebSocketClient::onConnected() {
     LOG_DEBUG("On CONNECTED");
-    login(); 
+    login();
     LOG_DEBUG("LOGGED_IN");
 }
 
@@ -359,11 +357,6 @@ void xmrig::WebSocketClient::login() {
     JsonRequest::create(doc, 1, "login", params);
 
     send(doc);
-}
-
-void xmrig::WebSocketClient::onClose() {
-    delete m_socks;
-    m_socks = nullptr;
 }
 
 void xmrig::WebSocketClient::onMessage(char *line, size_t len) {
@@ -463,7 +456,7 @@ void xmrig::WebSocketClient::parseNotification(const char *method,
         if (parseJob(params, &code)) {
             m_listener->onJobReceived(this, m_job, params);
         } else {
-            close();
+            m_socks->reconnect();
         }
 
         return;
@@ -487,7 +480,7 @@ void xmrig::WebSocketClient::parseResponse(int64_t id,
         }
 
         if (m_id == 1 || isCriticalError(message)) {
-            close();
+            m_socks->reconnect();
         }
 
         return;
@@ -505,7 +498,7 @@ void xmrig::WebSocketClient::parseResponse(int64_t id,
                         code);
             }
 
-            close();
+            m_socks->reconnect();
             return;
         }
 

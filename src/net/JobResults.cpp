@@ -317,6 +317,7 @@ void xmrig::JobResults::done(const Job &job)
 
 void xmrig::JobResults::setListener(IJobResultListener *listener, bool hwAES)
 {
+    LOG_DEBUG("Set Listeners: %p", listener);
     assert(handler == nullptr);
 
     handler = new JobResultsPrivate(listener, hwAES);
