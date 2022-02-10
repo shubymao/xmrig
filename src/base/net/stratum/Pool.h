@@ -50,6 +50,7 @@ public:
 #       ifdef XMRIG_FEATURE_BENCHMARK
         MODE_BENCHMARK,
 #       endif
+        MODE_WEBSOCKET,
     };
 
     static const String kDefaultPassword;
@@ -111,6 +112,7 @@ public:
     inline int zmq_port() const                         { return m_zmqPort; }
     inline uint64_t pollInterval() const                { return m_pollInterval; }
     inline void setAlgo(const Algorithm &algorithm)     { m_algorithm = algorithm; }
+    inline void setUrl(const char *url)                 { m_url = Url(url); }
     inline void setPassword(const String &password)     { m_password = password; }
     inline void setProxy(const ProxyUrl &proxy)         { m_proxy = proxy; }
     inline void setRigId(const String &rigId)           { m_rigId = rigId; }
@@ -155,6 +157,7 @@ private:
     String m_user;
     String m_spendSecretKey;
     uint64_t m_pollInterval         = kDefaultPollInterval;
+    bool m_useWebSocket             = false;
     Url m_daemon;
     Url m_url;
     int m_zmqPort                   = -1;
