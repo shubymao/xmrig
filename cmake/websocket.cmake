@@ -1,9 +1,14 @@
-set(XMRIG_WEBSOCKET_LIBRARY "xmrig-websocket")
-
 include(FetchContent)
 
 # === boost ===
-find_package(Boost REQUIRED COMPONENTS filesystem system thread regex)
+set(Boost_USE_STATIC_LIBS OFF) 
+set(Boost_USE_MULTITHREADED ON)  
+set(Boost_USE_STATIC_RUNTIME OFF) 
+
+find_package(Boost COMPONENTS filesystem system thread regex random REQUIRED)
+link_directories (${Boost_LIBRARY_DIRS})
+include_directories (${Boost_INCLUDE_DIR})
+
 
 # === websocket++ ===
 FetchContent_Declare(websocketpp
@@ -15,6 +20,6 @@ if(NOT websocketpp_POPULATED)
   add_subdirectory(${websocketpp_SOURCE_DIR} ${websocketpp_BINARY_DIR} EXCLUDE_FROM_ALL)
 endif()
 # add interface library with all websocketpp dependencies
-add_library(${XMRIG_WEBSOCKET_LIBRARY} INTERFACE)
-target_include_directories(${XMRIG_WEBSOCKET_LIBRARY} INTERFACE ${websocketpp_SOURCE_DIR})
-target_link_libraries(${XMRIG_WEBSOCKET_LIBRARY} INTERFACE Boost::system Boost::thread Boost::regex)
+include_directories(${websocketpp_SOURCE_DIR})
+
+
